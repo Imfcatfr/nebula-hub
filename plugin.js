@@ -1,3 +1,9 @@
+/**
+ * @name Local Message Modifier
+ * @author Imfcatfr
+ * @description Modify message text locally
+ * @version 1.0.0
+ */
 module.exports = class LocalMessageModifier {
   constructor() {
     this.storageKey = 'lmm:overrides:v1';
