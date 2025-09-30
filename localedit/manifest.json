@@ -3,12 +3,12 @@
   "description": "Locally edit any message in your client, just for fun.",
   "authors": [
     {
-      "name": "Imfcatfr",
-      "id": "0" 
+      "name": "aliernfrog",
+      "id": "459370047652102154" 
     }
   ],
   "main": "plugin.js",
   "vendetta": {
-    "icon": "ic_message_edit"
+    "icon": "ic_application_command_24px"
   }
 }
