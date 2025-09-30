@@ -1,111 +1,69 @@
-/**
- * @name LocalEdit
- * @description Locally edit other people's messages until restart
- * @author Imfcatfr
- * @version 1.0.0
- */
+const { patch } = vendetta.patcher;
+const { findByProps } = vendetta.metro;
+const { showInputAlert } = vendetta.ui.alerts;
 
-import { instead } from "@vendetta/patcher";
-import { findByProps } from "@vendetta/metro";
-import { showInputAlert } from "@vendetta/ui/alerts";
-import { after } from "@vendetta/patcher";
-
-const MessageActions = findByProps("openContextMenuLazy");
-const Messages = findByProps("sendMessage", "receiveMessage");
-const originalRender = new Map();
-
-export default {
+module.exports = {
   onLoad() {
-    this.patches = [];
-
-    // patch context menu
-    this.patches.push(after("openContextMenuLazy", MessageActions, (_, args, ret) => {
-      const [event, contextMenu] = args;
-      if (!contextMenu) return;
-
-      const orig = contextMenu.then;
-      contextMenu.then = (...a) =>
-        orig.apply(contextMenu, a).then((res) => {
-          const props = res?.props;
-          if (!props?.children) return res;
-
-          // Insert our custom button
-          props.children.push({
-            label: "Edit locally",
-            onPress: () => {
-              const msg = props.message;
-              if (!msg || msg.author?.id === Messages.getCurrentUser().id) return;
-
-              showInputAlert({
-                title: "Local Edit",
-                placeholder: "Enter new text",
-                initialValue: msg.content,
-                onConfirm: (text) => {
-                  if (!originalRender.has(msg.id)) {
-                    originalRender.set(msg.id, msg.content);
-                  }
-                  msg.content = text;
-                  // force rerender
-                  Messages.receiveMessage(msg.channel_id, { ...msg });
-                },
+    // Patch the message context menu
+    const unpatchMenu = patch("openContextMenuLazy", (args, original) => {
+      const [event, menu] = args;
+      const menuElement = original(event, menu);
+      // menuElement is (likely) a promise or React element
+      // Use .then() if needed and then insert our button
+      if (menuElement && menuElement.then) {
+        return menuElement.then(res => {
+          const props = res.props?.children;
+          if (props && res.props.message) {
+            // Don't add for your own messages
+            if (res.props.message.author.id !== findByProps("getCurrentUser").getCurrentUser().id) {
+              props.push({
+                label: "Edit Locally",
+                onPress: () => {
+                  const msg = res.props.message;
+                  showInputAlert({
+                    title: "Local Edit",
+                    placeholder: "New text",
+                    initialValue: msg.content,
+                    onConfirm: (text) => {
+                      // Store original text and update view
+                      if (!this.originals) this.originals = new Map();
+                      if (!this.originals.has(msg.id)) {
+                        this.originals.set(msg.id, msg.content);
+                      }
+                      msg.content = text;
+                      // Force UI update by dispatching (if needed)
+                      findByProps("receiveMessage").receiveMessage(msg.channel_id, { ...msg });
+                    }
+                  });
+                }
               });
-            },
-          });
-
+            }
+          }
           return res;
         });
-    }));
-  },
-
-  onUnload() {
-    this.patches.forEach((u) => u());
-    this.patches = [];
-
-    // restore messages to original if modified
-    for (const [id, content] of originalRender) {
-      const msg = Messages.getMessage?.(id);
-      if (msg) {
-        msg.content = content;
-        Messages.receiveMessage(msg.channel_id, { ...msg });
       }
-    }
-    originalRender.clear();
-  },
-};    } catch(e){}
-    return null;
-  }
-  _scanNode(node) {
-    if (!node || node.nodeType !== Node.ELEMENT_NODE) return;
-    if (node.matches && (node.matches('input, textarea, [contenteditable="true"]') || node.closest && node.closest('input,textarea,[contenteditable="true"]'))) return;
-    const messageAncestor = this._findMessageAncestor(node);
-    if (!messageAncestor) return;
-    const mid = this._deriveMessageId(messageAncestor);
-    const override = this._getOverride(mid);
-    if (!override) return;
-    this._applyOverrideToElement(messageAncestor, override);
-    if (messageAncestor.dataset) messageAncestor.dataset[this.processedFlag] = Date.now().toString();
-  }
-  _deriveMessageId(el) {
-    try {
-      const a = el.getAttribute && (el.getAttribute('data-message-id') || el.getAttribute('data-list-item-id') || el.getAttribute('data-author-id') || el.getAttribute('data-user-id'));
-      if (a) return a;
-      const author = this._detectAuthorId(el) || 'unknown';
-      const txt = (this._extractTextFromMessage(el) || '').slice(0,200);
-      return `${author}:${this._hashString(txt)}`;
-    } catch(e){ return 'unknown'; }
-  }
-  _findMessageAncestor(node) {
-    let el = node;
-    for (let i=0;i<10 && el;i++,el=el.parentElement) {
-      try {
-        if (!el) break;
-        if (el.getAttribute) {
-          const listId = el.getAttribute('data-list-item-id') || '';
-          if (listId && listId.toLowerCase().includes('chat-messages')) return el;
+      return menuElement;
+    });
+
+    // On unload: revert edits and unpatch
+    return {
+      onUnload() {
+        // Revert any edited messages
+        if (this.originals) {
+          for (let [id, content] of this.originals) {
+            const msg = findByProps("getMessage").getMessage(id);
+            if (msg) {
+              msg.content = content;
+              findByProps("receiveMessage").receiveMessage(msg.channel_id, { ...msg });
+            }
+          }
+          this.originals.clear();
         }
-        const role = el.getAttribute && el.getAttribute('role');
-        if (role === 'article' || role === 'listitem') {
-          const c = el.className || '';
+        unpatchMenu();
+      }
+    };
+  }
+};          const c = el.className || '';
           if (typeof c === 'string' && c.toLowerCase().includes('message')) return el;
         }
         if (el.hasAttribute && (el.hasAttribute('data-message-id') || el.hasAttribute('data-author-id') || el.hasAttribute('data-list-id'))) return el;
