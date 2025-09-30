@@ -1,111 +1,77 @@
 /**
- * @name Local Message Modifier
+ * @name LocalEdit
+ * @description Locally edit other people's messages until restart
  * @author Imfcatfr
- * @description Modify message text locally
  * @version 1.0.0
  */
-module.exports = class LocalMessageModifier {
-  constructor() {
-    this.storageKey = 'lmm:overrides:v1';
-    this.observer = null;
-    this.menuObserver = null;
-    this.processedFlag = 'lmm-processed-v1';
-    this.overrides = this._load() || {};
-  }
-  get name() { return 'Local Message Modifier'; }
-  get author() { return 'You'; }
-  get description() { return 'Add a "Modify (local)" entry to message context menus and save a local-only override for message text.'; }
-  get version() { return '1.0.0'; }
-  start() {
-    this._startObservers();
-    this._applyAllOverrides();
-    console.log('[LMM] started');
-  }
-  stop() {
-    if (this.observer) { this.observer.disconnect(); this.observer = null; }
-    if (this.menuObserver) { this.menuObserver.disconnect(); this.menuObserver = null; }
-    this._reloadVisibleChats();
-    console.log('[LMM] stopped');
-  }
-  _startObservers() {
-    const cfg = { childList: true, subtree: true, characterData: true };
-    this.observer = new MutationObserver(m => {
-      try {
-        for (const mut of m) {
-          if (mut.addedNodes && mut.addedNodes.length) {
-            for (const n of Array.from(mut.addedNodes)) this._scanNode(n);
-          }
-          if (mut.type === 'characterData' && mut.target) this._scanNode(mut.target.parentNode || mut.target);
-        }
-      } catch (e) { console.warn('[LMM] observer', e); }
-    });
-    try { this.observer.observe(document.body, cfg); } catch(e){}
-    this.menuObserver = new MutationObserver(m => {
-      try {
-        for (const mut of m) {
-          if (!mut.addedNodes) continue;
-          for (const node of Array.from(mut.addedNodes)) this._enhanceMenu(node);
-        }
-      } catch(e){ console.warn('[LMM] menuObserver', e); }
-    });
-    try { this.menuObserver.observe(document.body, { childList: true, subtree: true }); } catch(e){}
-    try { document.querySelectorAll('div,span,p').forEach(n=>this._scanNode(n)); } catch(e){}
-  }
-  _enhanceMenu(node) {
-    try {
-      const el = node.nodeType === Node.ELEMENT_NODE ? node : node.parentElement;
-      if (!el) return;
-      const menu = el.querySelector && (el.querySelector('[role="menu"]') || (el.getAttribute && el.getAttribute('role') === 'menu' ? el : null));
-      if (!menu) return;
-      if (menu.dataset && menu.dataset.lmmEnhanced) return;
-      menu.dataset.lmmEnhanced = '1';
-      const item = document.createElement('div');
-      item.setAttribute('role','menuitem');
-      item.style.padding = '8px 12px';
-      item.style.cursor = 'pointer';
-      item.innerText = 'Modify message (local)';
-      item.onclick = (ev) => {
-        ev.stopPropagation();
-        const ctx = this._findMenuMessageContext(menu);
-        if (!ctx) { alert('Could not find message context'); return; }
-        const { messageEl, messageId } = ctx;
-        const current = this._getOverride(messageId) || this._extractTextFromMessage(messageEl) || '';
-        const val = prompt('Local message override (leave empty to clear):', current);
-        if (val === null) return;
-        if (val.trim() === '') { this._removeOverride(messageId); } else { this._setOverride(messageId, val); }
-        this._applyOverrideToElement(messageEl, this._getOverride(messageId));
-      };
-      const clear = document.createElement('div');
-      clear.setAttribute('role','menuitem');
-      clear.style.padding = '8px 12px';
-      clear.style.cursor = 'pointer';
-      clear.innerText = 'Clear local modification';
-      clear.onclick = (ev) => {
-        ev.stopPropagation();
-        const ctx = this._findMenuMessageContext(menu);
-        if (!ctx) { alert('Could not find message context'); return; }
-        const { messageEl, messageId } = ctx;
-        this._removeOverride(messageId);
-        this._applyOverrideToElement(messageEl, null);
-      };
-      menu.appendChild(item);
-      menu.appendChild(clear);
-    } catch(e){}
-  }
-  _findMenuMessageContext(menuEl) {
-    try {
-      let anchor = menuEl;
-      for (let i=0;i<12 && anchor;i++,anchor=anchor.parentElement) {
-        const msg = anchor.querySelector && (anchor.querySelector('[data-message-id]') || anchor.querySelector('[data-author-id]') || anchor.querySelector('[data-list-item-id]'));
-        if (msg) return { messageEl: msg, messageId: this._deriveMessageId(msg) };
+
+import { instead } from "@vendetta/patcher";
+import { findByProps } from "@vendetta/metro";
+import { showInputAlert } from "@vendetta/ui/alerts";
+import { after } from "@vendetta/patcher";
+
+const MessageActions = findByProps("openContextMenuLazy");
+const Messages = findByProps("sendMessage", "receiveMessage");
+const originalRender = new Map();
+
+export default {
+  onLoad() {
+    this.patches = [];
+
+    // patch context menu
+    this.patches.push(after("openContextMenuLazy", MessageActions, (_, args, ret) => {
+      const [event, contextMenu] = args;
+      if (!contextMenu) return;
+
+      const orig = contextMenu.then;
+      contextMenu.then = (...a) =>
+        orig.apply(contextMenu, a).then((res) => {
+          const props = res?.props;
+          if (!props?.children) return res;
+
+          // Insert our custom button
+          props.children.push({
+            label: "Edit locally",
+            onPress: () => {
+              const msg = props.message;
+              if (!msg || msg.author?.id === Messages.getCurrentUser().id) return;
+
+              showInputAlert({
+                title: "Local Edit",
+                placeholder: "Enter new text",
+                initialValue: msg.content,
+                onConfirm: (text) => {
+                  if (!originalRender.has(msg.id)) {
+                    originalRender.set(msg.id, msg.content);
+                  }
+                  msg.content = text;
+                  // force rerender
+                  Messages.receiveMessage(msg.channel_id, { ...msg });
+                },
+              });
+            },
+          });
+
+          return res;
+        });
+    }));
+  },
+
+  onUnload() {
+    this.patches.forEach((u) => u());
+    this.patches = [];
+
+    // restore messages to original if modified
+    for (const [id, content] of originalRender) {
+      const msg = Messages.getMessage?.(id);
+      if (msg) {
+        msg.content = content;
+        Messages.receiveMessage(msg.channel_id, { ...msg });
       }
-      const selection = window.getSelection && window.getSelection().focusNode;
-      if (selection) {
-        const el = selection.nodeType===3 ? selection.parentElement : selection;
-        const ma = this._findMessageAncestor(el);
-        if (ma) return { messageEl: ma, messageId: this._deriveMessageId(ma) };
-      }
-    } catch(e){}
+    }
+    originalRender.clear();
+  },
+};    } catch(e){}
     return null;
   }
   _scanNode(node) {
