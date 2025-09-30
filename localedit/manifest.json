@@ -1,0 +1,11 @@
+{
+  "name": "LocalEdit",
+  "description": "Locally edit other people's messages until restart.",
+  "authors": [
+    {
+      "name": "Imfcatfr"
+    }
+  ],
+  "main": "plugin.js",
+  "version": "1.0.0"
+}
