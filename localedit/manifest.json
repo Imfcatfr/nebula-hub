@@ -1,10 +1,10 @@
 {
-  "name": "LocalEdit",
-  "description": "Locally edit any message in your client, just for fun.",
+  "name": "ELM",
+  "description": "Adds optionsvehdh to copy command mention and ID in the command popout.",
   "authors": [
     {
       "name": "aliernfrog",
-      "id": "459370047652102154" 
+      "id": "459370047652102154"
     }
   ],
   "main": "plugin.js",
