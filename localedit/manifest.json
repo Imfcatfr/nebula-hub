@@ -7,7 +7,7 @@
       "id": "459370047652102154"
     }
   ],
-  "main": "plugin.js",
+  "main": "src/plugin.js",
   "vendetta": {
     "icon": "ic_application_command_24px"
   }
